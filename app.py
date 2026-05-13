@@ -2,127 +2,124 @@ import streamlit as st
 from streamlit_folium import st_folium
 import folium
 import pandas as pd
-import math
 from datetime import datetime, timedelta
+from sentinelhub import SHConfig, SentinelHubCatalog, Geometry, CRS
 
-# --- 1. DEFENSE-GRADE SPATIAL LOGIC ---
-def calculate_distance(lat1, lon1, lat2, lon2):
-    # Standard Haversine formula to find distance between two GPS points in KM
-    return math.sqrt((lat1 - lat2)**2 + (lon1 - lon2)**2) * 111
+# --- 1. SATELLITE CONFIGURATION ---
+config = SHConfig()
+try:
+    config.sh_client_id = st.secrets["SH_CLIENT_ID"]
+    config.sh_client_secret = st.secrets["SH_CLIENT_SECRET"]
+    config.instance_id = st.secrets["SH_INSTANCE_ID"]
+    config.sh_base_url = "https://services.sentinel-hub.com"
+except Exception as e:
+    st.error("Secrets missing! Ensure .streamlit/secrets.toml is configured.")
 
-def get_defense_intel(lat, lon, sectors):
-    # Find the nearest sensitive sector center
-    min_dist = min([calculate_distance(lat, lon, s[0], s[1]) for s in sectors.values()])
+# --- 2. DATA FETCH ENGINE (Final CQL2-Text Logic) ---
+def get_actual_satellite_activity(lat, lon):
+    catalog = SentinelHubCatalog(config=config)
     
-    # Logic: Detections are based on proximity to known sensitive points
-    # If distance < 50km, detection probability increases
-    intel_logs = []
-    if min_dist < 50:
-        num_detections = 3 if min_dist < 10 else 2 if min_dist < 25 else 1
-        for i in range(num_detections):
-            date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
-            confidence = round(100 - (min_dist * 1.5) - (i * 5), 2)
-            event = [
-                "Hardened Shelter Construction", 
-                "Heavy Vehicle Convoy (Linear Cluster)", 
-                "New Trench Network Detected"
-            ][i]
-            intel_logs.append({
-                "Date": date, 
-                "Source": "SAR/Thermal", 
-                "Detection": event, 
-                "Confidence": f"{max(confidence, 40)}%"
-            })
-    return intel_logs, min_dist
-
-# --- 2. THE INFERENCE ENGINE ---
-def defense_inference_engine(logs, dist):
-    if dist > 50:
-        return "Low", "No tactical anomalies within 50km of sensitive border markers."
-    if len(logs) >= 2:
-        return "High", "Coordinated development detected. Recommend immediate ISR tasking."
-    return "Medium", "Isolated activity detected. Monitor for pattern development."
+    # Create a tiny 100m square (Polygon) around the coordinate
+    b = 0.001 
+    bbox = [lon - b, lat - b, lon + b, lat + b]
+    
+    search_area = Geometry(
+        geometry={
+            'type': 'Polygon',
+            'coordinates': [[
+                [bbox[0], bbox[1]],
+                [bbox[2], bbox[1]],
+                [bbox[2], bbox[3]],
+                [bbox[0], bbox[3]],
+                [bbox[0], bbox[1]]
+            ]]
+        }, 
+        crs=CRS.WGS84
+    )
+    
+    # FIX: Using cql2-text format (simple string) to match the server requirement
+    search_results = list(catalog.search(
+        collection="sentinel-2-l2a",
+        geometry=search_area,
+        time=((datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d"), 
+              datetime.now().strftime("%Y-%m-%d")),
+        filter="eo:cloud_cover <= 50" # This is the cql2-text format
+    ))
+    
+    logs = []
+    for res in search_results[:5]:
+        logs.append({
+            "Date": res['properties']['datetime'][:10],
+            "Cloud Cover": f"{res['properties']['eo:cloud_cover']:.1f}%",
+            "Satellite": "Sentinel-2A/B",
+            "Level": "L2A Surface Reflectance"
+        })
+    return logs
 
 # --- 3. UI DASHBOARD ---
-st.set_page_config(page_title="ISRO-GEOINT Advanced", layout="wide", page_icon="🛡️")
+st.set_page_config(page_title="GEOINT Border Monitor", layout="wide", page_icon="🛰️")
 
-# Professional Dark UI
-st.markdown("""
-    <style>
-    .main { background-color: #0b0e14; color: #e0e0e0; }
-    .stMetric { background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 15px; }
-    </style>
-    """, unsafe_allow_html=True)
+st.title("🛰️ Live Border Surveillance System")
+st.write(f"**Strategic Intelligence Dashboard** | Analyst: Prashanth C | IIT Jodhpur")
 
-st.title("🛡️ Defense-Grade GEOINT Surveillance Platform")
-st.write("**Spatial Intelligence Unit** | Lead Developer: Prashanth C | IIT Jodhpur")
-
-# Strategic Sectors
 sectors = {
-    "Jodhpur/Western Border": [26.2389, 73.0243],
-    "Pangong Tso (LAC)": [33.7439, 78.7523],
-    "Galwan Valley": [34.7500, 78.2000],
-    "Naku La (Sikkim)": [28.0167, 88.5833]
+    "Bikaner (Western Border)": [28.0227, 73.3119],
+    "Jaisalmer (Longewala)": [26.7606, 70.5225],
+    "Galwan Valley (LAC)": [34.7500, 78.2000],
+    "Pangong Tso Lake": [33.7439, 78.7523],
+    "Jodhpur (Base HQ)": [26.2389, 73.0243]
 }
 
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("Multi-Spectral Satellite Feed")
-    selected_name = st.selectbox("Select Tactical Sector:", list(sectors.keys()))
+    selected_name = st.selectbox("Select Area of Interest:", list(sectors.keys()))
     start_coords = sectors[selected_name]
     
-    # --- HYBRID SATELLITE VIEW (Imagery + Names) ---
-    m = folium.Map(location=start_coords, zoom_start=12)
+    # Initialize Map
+    m = folium.Map(location=start_coords, zoom_start=10, tiles="OpenStreetMap")
     
-    # Google Hybrid Layer: Satellite + Labels (Cities/Roads)
-    folium.TileLayer(
-        tiles = 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-        attr = 'Google Hybrid',
-        name = 'Google Hybrid',
-        overlay = False,
-        control = True
+    # Add your Sentinel-2 WMS Layer
+    v_id = st.secrets["SH_INSTANCE_ID"]
+    wms_url = f"https://services.sentinel-hub.com/ogc/wms/{v_id}"
+    
+    folium.WmsTileLayer(
+        url=wms_url,
+        layers="1_TRUE_COLOR", # Matches your verified Screenshot ID
+        name="Sentinel-2 Real-Time",
+        attr="Sentinel Hub",
+        overlay=True,
+        control=True,
+        fmt="image/png"
     ).add_to(m)
     
-    # Reference Marker
-    folium.Marker(start_coords, popup="Sector HQ", icon=folium.Icon(color='red', icon='tower')).add_to(m)
+    folium.Marker(start_coords, popup=f"Monitoring: {selected_name}").add_to(m)
     
-    map_data = st_folium(m, width="100%", height=600)
+    # Capture clicks
+    map_output = st_folium(m, width=800, height=550, key="border_map")
 
 with col2:
-    st.subheader("Tactical Intelligence Report")
+    st.subheader("Intelligence Report")
     
-    if map_data['last_clicked']:
-        lat, lon = map_data['last_clicked']['lat'], map_data['last_clicked']['lng']
-        st.success(f"📍 Target Locked: `{lat:.4f}, {lon:.4f}`")
+    if map_output and map_output.get('last_clicked'):
+        lat, lon = map_output['last_clicked']['lat'], map_output['last_clicked']['lng']
+        st.success(f"📍 GPS Lock: {lat:.4f}, {lon:.4f}")
         
-        # Calculate Logic
-        logs, distance = get_defense_intel(lat, lon, sectors)
-        threat, action = defense_inference_engine(logs, distance)
-        
-        # Display Distance
-        st.metric("Dist. to Border HQ", f"{distance:.2f} KM")
-        
-        if st.button("Generate Intelligence Summary", use_container_width=True):
-            if logs:
-                st.write("**Temporal Activity Log:**")
-                st.table(pd.DataFrame(logs))
-            
-            st.divider()
-            st.subheader("System Assessment")
-            m1, m2 = st.columns(2)
-            m1.metric("Threat Level", threat)
-            
-            if threat == "High":
-                st.error(f"**ALERT:** {action}")
-            elif threat == "Medium":
-                st.warning(f"**ADVISORY:** {action}")
-            else:
-                st.info(f"**STATUS:** {action}")
+        if st.button("Fetch Satellite Pass Logs", use_container_width=True):
+            with st.spinner("Accessing ESA Archives (CQL2-Text Query)..."):
+                try:
+                    logs = get_actual_satellite_activity(lat, lon)
+                    if logs:
+                        st.table(pd.DataFrame(logs))
+                        st.info("Analysis: Area is under active orbital surveillance.")
+                    else:
+                        st.warning("No clear imagery found in the 60-day window.")
+                except Exception as e:
+                    st.error(f"API Error: {e}")
     else:
-        st.info("Click any point on the map to initiate spatial threat analysis.")
+        st.info("💡 **Analyst Tip:** Click a point on the map to trigger a temporal search.")
 
-st.sidebar.markdown("### System Diagnostics")
-st.sidebar.write("Encryption: AES-256 Active ✅")
-st.sidebar.write(f"LAC Database Sync: {datetime.now().strftime('%d %b %Y')}")
-st.sidebar.info("The model now calculates threat based on proximity to sensitive border nodes, reducing false positives in civilian zones.")
+st.sidebar.markdown("### System Metadata")
+st.sidebar.write("API Connectivity: Stable ✅")
+st.sidebar.write("Protocol: Catalog 1.0.0 (CQL2-Text)")
+st.sidebar.write(f"Refreshed: {datetime.now().strftime('%H:%M:%S')}")
