@@ -1,4 +1,3 @@
-
 import streamlit as st
 from streamlit_folium import st_folium
 import folium
@@ -7,15 +6,13 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 # --- 1. MOCK TEMPORAL DATA GENERATOR ---
-# Simulates "Activity Logs" by looking back at the last 72 hours
 def get_historical_activity(lat, lon):
     activities = []
-    # Seed randomness with coordinates so same spot gives consistent "fake" data for the session
-    random.seed(lat + lon) 
+    # Seed randomness so a specific coordinate always gives consistent "mock" results
+    random.seed(int(lat * 1000) + int(lon * 1000)) 
     
     for i in range(3):
         date = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
-        # 60% chance of detecting a change in a border sector
         if random.random() > 0.4:
             event = random.choice([
                 "New Concrete Foundation (Bunker Type)", 
@@ -24,7 +21,11 @@ def get_historical_activity(lat, lon):
                 "Earth Moving Equipment Spotted",
                 "Surface-to-Air Battery Signature"
             ])
-            activities.append({"Date": date, "Coordinate": f"{lat:.4f}, {lon:.4f}", "Detection": event})
+            activities.append({
+                "Date": date, 
+                "Coordinate": f"{lat:.4f}, {lon:.4f}", 
+                "Detection": event
+            })
     return activities
 
 # --- 2. THE INFERENCE ENGINE (Logic for History) ---
@@ -32,7 +33,6 @@ def analyze_temporal_threat(activity_logs):
     if not activity_logs:
         return "Low", "Routine Status. No significant changes detected in the 72h window."
     
-    # Advanced logic based on frequency of activity
     if len(activity_logs) >= 2:
         return "High", "Critical Infrastructure Growth. Recommend immediate Satellite Tasking or Drone Recon."
     return "Medium", "Anomalous Activity detected. Increase monitoring frequency for this sector."
@@ -40,13 +40,13 @@ def analyze_temporal_threat(activity_logs):
 # --- 3. UI DASHBOARD ---
 st.set_page_config(page_title="GEOINT Border Monitor", layout="wide", page_icon="🛰️")
 
-# Custom CSS for a professional look
+# Corrected Custom CSS
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
-    .stMetric { background-color: #1f2937; padding: 10px; border-radius: 10px; }
+    .stMetric { background-color: #1f2937; padding: 15px; border-radius: 10px; border: 1px solid #374151; }
     </style>
-    """, unsafe_all_low_case=True)
+    """, unsafe_allow_html=True) # FIXED PARAMETER HERE
 
 st.title("🛰️ Border Activity Monitoring System (Temporal)")
 st.write(f"**Surveillance Dashboard** | Analyst: Prashanth C | IIT Jodhpur")
@@ -67,7 +67,6 @@ with col1:
     start_coords = sectors[selected_name]
     
     # Initialize Folium Map
-    # Note: Using 'cartodbpositron' for a clean, professional military look
     m = folium.Map(location=start_coords, zoom_start=12, control_scale=True)
     
     # Add a marker for the current center
@@ -83,7 +82,6 @@ with col1:
 with col2:
     st.subheader("Intelligence Report")
     
-    # Determine coordinates (either from click or default)
     if map_data['last_clicked']:
         lat = map_data['last_clicked']['lat']
         lon = map_data['last_clicked']['lng']
@@ -97,7 +95,7 @@ with col2:
     if st.button("Query Temporal Change Logs", use_container_width=True):
         with st.spinner("Accessing Historical Archives..."):
             import time
-            time.sleep(1) # Simulate server latency
+            time.sleep(1) 
             
             logs = get_historical_activity(lat, lon)
             threat, action = analyze_temporal_threat(logs)
@@ -111,7 +109,6 @@ with col2:
             st.write("---")
             st.subheader("Threat Assessment")
             
-            # Using columns for metrics
             m1, m2 = st.columns(2)
             m1.metric("Current Level", threat)
             
